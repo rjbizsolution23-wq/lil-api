@@ -1,0 +1,9 @@
+name = "lil-api-worker"
+main = "src/index.ts"
+compatibility_date = "2026-03-27"
+
+[observability]
+enabled = true
+
+[vars]
+ENV = "production"
