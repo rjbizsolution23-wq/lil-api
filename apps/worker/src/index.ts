@@ -12,7 +12,6 @@ import { logger } from 'hono/logger'
 import { prettyJSON } from 'hono/pretty-json'
 import { z } from 'zod'
 import { zValidator } from '@hono/zod-validator'
-import { rateLimit } from 'hono-rate-limiter'
 
 // ============================================================================
 // CONFIG
@@ -44,16 +43,26 @@ app.use('*', logger())
 // Pretty JSON responses
 app.use('*', prettyJSON())
 
-// Rate limiting (3 layers)
-app.use('*', rateLimit({
-  kv: undefined, // Will bind at runtime
-  limit: 60,
-  window: 60,
-  keyGenerator: (c) => c.req.header('CF-Connecting-IP') || 'unknown',
-  message: { error: 'Rate limit exceeded', retryAfter: 60 },
-  standardHeaders: true,
-  legacyHeaders: false,
-}))
+// Custom rate limiting (3 layers)
+async function rateLimitMiddleware(c: any, next: () => Promise<Response>) {
+  const ip = c.req.header('CF-Connecting-IP') || 'unknown'
+  const key = `ratelimit:${ip}`
+  const current = await c.env.RATE_LIMIT.get(key)
+  const count = current ? parseInt(current) + 1 : 1
+  const ttl = 60 // 60 second window
+
+  c.header('X-RateLimit-Limit', '60')
+  c.header('X-RateLimit-Remaining', String(Math.max(0, 60 - count)))
+
+  if (count > 60) {
+    return c.json({ error: 'Rate limit exceeded', retryAfter: ttl }, 429)
+  }
+
+  await c.env.RATE_LIMIT.put(key, String(count), { expirationTtl: ttl })
+  await next()
+}
+
+app.use('/api/*', rateLimitMiddleware)
 
 // ============================================================================
 // AUTH MIDDLEWARE
